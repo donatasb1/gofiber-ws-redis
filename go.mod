@@ -1,6 +1,6 @@
-module api
+module stream_app
 
-go 1.21.3
+go 1.21.6
 
 require (
 	github.com/gofiber/contrib/websocket v1.2.2
