@@ -47,7 +47,6 @@ func NewTopic(topic_id string, hub *Hub) *Topic {
 		topic_id + "::public_bid":    &null_id,
 		topic_id + "::public_ask":    &null_id,
 	}
-
 	cache := map[string]*MsgCache{
 		topic_id + "::public_trades": NewCache(30),
 		topic_id + "::public_bid":    NewCache(1),
@@ -73,16 +72,15 @@ type SuccessMsg struct {
 
 func (t *Topic) runTopic() {
 	defer fmt.Println("Closing topic...")
-	fmt.Println("\nTopic starting: ", t.topic_id)
 	// Run topic broadcast
 	// on init setup ids
 	t.initTopicCache()
-	go t.ReadStream()
+	done := make(chan struct{})
+	go t.ReadStream(done)
 
 	for {
 		select {
 		case wsop := <-t.register:
-
 			t.subs[wsop.client] = true
 			wsop.client.register <- t.topic_id
 			t.SubAck(wsop)
@@ -95,27 +93,13 @@ func (t *Topic) runTopic() {
 				t.hub.topicChannel <- t.topic_id
 			}
 		case <-t.closeChannel:
+			close(done)
 			return
 
 		case msg_bytes := <-t.outChannel:
 			for client := range t.subs {
 				client.outChannel <- msg_bytes
 			}
-
-			// for _, stream := range XStream {
-			// 	for _, msg := range stream.Messages {
-			// 		t.stream_id[stream.Stream] = &msg.ID
-			// 		msg_bytes, err := json.Marshal(msg.Values)
-			// 		if err != nil {
-			// 			fmt.Println("Error:", err)
-			// 			continue
-			// 		}
-			// 		t.msgCache[stream.Stream].AppendCache(msg_bytes)
-			// 		for client := range t.subs {
-			// 			client.outChannel <- msg_bytes
-			// 		}
-			// 	}
-			// }
 		}
 	}
 }
@@ -134,40 +118,41 @@ func (t *Topic) SubAck(wsop *WSOP) {
 
 func (t *Topic) StreamArgs() []string {
 	return []string{
-		t.topic_id + "::public_trades",
-		t.topic_id + "::public_bid",
-		t.topic_id + "::public_ask",
-		*t.stream_id[t.topic_id+"::public_trades"],
-		*t.stream_id[t.topic_id+"::public_bid"],
-		*t.stream_id[t.topic_id+"::public_ask"],
+		t.topic_id,
+		*t.stream_id[t.topic_id],
 	}
 }
 
-func (t *Topic) ReadStream() {
+func (t *Topic) ReadStream(done chan struct{}) {
 	for {
-		args := redis.XReadArgs{
-			Streams: t.StreamArgs(),
-			Count:   1,
-			Block:   time.Duration(1000000000 * 60 * 5),
-		}
-		XStream, err := rpool.XRead(context.Background(), &args).Result()
-		if err != nil {
-			fmt.Println("Empty read", t.topic_id)
-			continue
-		}
-		for _, stream := range XStream {
-			for _, msg := range stream.Messages {
-				t.stream_id[stream.Stream] = &msg.ID
-				msg_bytes, err := json.Marshal(msg.Values)
-				if err != nil {
-					fmt.Println("Error:", err)
-					continue
+		select {
+		case <-done:
+			return
+		default:
+			args := redis.XReadArgs{
+				Streams: t.StreamArgs(),
+				Count:   1,
+				Block:   time.Duration(1000000000 * 60),
+			}
+			XStream, err := rpool.XRead(context.Background(), &args).Result()
+			if err != nil {
+				continue
+			}
+			for _, stream := range XStream {
+				for _, msg := range stream.Messages {
+					t.stream_id[stream.Stream] = &msg.ID
+					msg_bytes, err := json.Marshal(msg.Values)
+					if err != nil {
+						fmt.Println("Error:", err)
+						continue
+					}
+					if _, exists := t.msgCache[stream.Stream]; exists {
+						t.msgCache[stream.Stream].AppendCache(msg_bytes)
+					}
+					t.outChannel <- msg_bytes
 				}
-				t.msgCache[stream.Stream].AppendCache(msg_bytes)
-				t.outChannel <- msg_bytes
 			}
 		}
-		// t.outChannel <- XStream
 	}
 }
 
@@ -201,13 +186,11 @@ func (t *Topic) GetID(stream string) {
 		return
 	}
 	t.stream_id[stream] = &stream_info.LastEntry.ID
-	fmt.Println("set topic id ", t.stream_id)
 }
 
 func (t *Topic) fetchStartMsg(stream string, size int64) {
 	msgs, err := rpool.XRevRangeN(context.Background(), stream, "+", "-", size).Result()
 	if err != nil {
-		fmt.Println("Start msg error", err)
 		return
 	}
 	for i := len(msgs) - 1; i >= 0; i-- {

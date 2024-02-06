@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/gofiber/contrib/websocket"
@@ -51,9 +50,7 @@ func main() {
 		arr := strings.FieldsFunc(channel_id, func(r rune) bool {
 			return r == ','
 		})
-
 		wsc := NewWSClient(c, hub)
-		fmt.Println("Websocket starting. Channel args", arr)
 		wsop := &WSOP{
 			Op:     "subscribe",
 			Args:   arr,

@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
@@ -33,9 +32,7 @@ func NewWSClient(ws *websocket.Conn, h *Hub) *WSClient {
 
 func (wsc *WSClient) RunWS() {
 	go wsc.ReadMsg()
-	fmt.Println("Client starting...")
 	defer func() {
-		fmt.Println("Websocket closing...")
 		wsc.CloseWS()
 	}()
 	for {
@@ -70,7 +67,6 @@ func (wsc *WSClient) ReadMsg() {
 }
 
 func (wsc *WSClient) CloseWS() {
-	fmt.Println("Websocket starting close ")
 	// unsub from every topic
 	keys := make([]string, 0, len(wsc.subscriptions))
 	for key := range wsc.subscriptions {
